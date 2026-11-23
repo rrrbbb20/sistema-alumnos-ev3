@@ -56,3 +56,21 @@ Pega aquí (o adjunta) el `TRAZABILIDAD.md` del último build y completa un reco
 | Revisión de seguridad (Bandit) | | #__ | | #__ | |
 | Prueba automatizada (OWASP ZAP) | | #__ | | #__ | |
 | Gestión de dependencias (Dependabot) | | #__ | PR #__ | #__ | |
+
+
+
+# Registro de Seguridad — Sistema Alumnos (OCY1102)
+
+## 1. Revisiones Continuas de Seguridad (SAST, SCA y DAST)
+- **SAST (Bandit):** Integrado en la etapa `Security Review (SAST & SCA)` sobre `app.py`. Detectó inicialmente 5 hallazgos (2 High, 2 Medium, 1 Low).
+- **SCA (pip-audit):** Integrado en la etapa `Security Review (SAST & SCA)` sobre `requirements.txt`. Detectó 19 CVEs en `Flask 2.2.2`, `Werkzeug 2.2.2`, `Jinja2 3.1.2` y `Gunicorn 21.2.0`.
+- **DAST (OWASP ZAP 2.16.1):** Integrado en la etapa `Deploy Staging & DAST (OWASP ZAP)` contra `http://jenkins:5001`. Detectó inicialmente 3 alertas High (SQL Injection, XSS Reflected, XSS DOM Based), 3 Medium (Anti-CSRF, CSP, X-Frame-Options) y 1 Low (X-Content-Type-Options).
+
+## 2. Vulnerabilidades Identificadas y Mitigaciones Aplicadas
+| ID | Severidad | Hallazgo | Archivo / Ruta | Mitigación Aplicada | Commit |
+|---|---|---|---|---|---|
+| VULN-01 | High / Low | Secretos fijos (`SECRET_KEY`) y hash débil MD5 (CWE-259, CWE-327) | `app.py` (`/login`) | Lectura por variables de entorno, `secrets.token_hex(32)` y PBKDF2-SHA256 (`werkzeug.security`) con `secrets.compare_digest`. | `VULN-01` |
+| VULN-02 | High / Medium | Inyección SQL y fuga de error SQLite (CWE-89) | `app.py` (`/alumnos/buscar`) | Consulta parametrizada (`LIKE ?`) con tupla de parámetros y mensaje de error genérico HTTP 500. | `VULN-02` |
+| VULN-03 | High | Cross-Site Scripting (XSS) reflejado y DOM (CWE-79) | `app.py` (`/hello`) | Sanitización estricta del parámetro `name` mediante `markupsafe.escape()`. | `VULN-03` |
+| VULN-04 | Medium / Low | Ausencia de token anti-CSRF y cabeceras HTTP de seguridad (CWE-352, CWE-693) | `app.py` (`/login`, `after_request`) | Token aleatorio por sesión (`csrf_token`) validado con `compare_digest` y cabeceras `CSP`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` y `Referrer-Policy`. | `VULN-04` |
+| VULN-05 | High / Medium | Modo depuración activo (`debug=True`) y bind `0.0.0.0` (CWE-94, CWE-605) | `app.py` (`__main__`) | `debug=False` y enlace por defecto a `127.0.0.1` configurable por `FLASK_HOST`. | `VULN-05` |
