@@ -49,14 +49,14 @@ pipeline {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
                     sh '''#!/bin/bash
                     set +e
-                    .venv/bin/bandit -f json -o reports/bandit.json app.py
-                    .venv/bin/bandit -f txt -o reports/bandit.txt app.py
+                    bandit -f json -o reports/bandit.json app.py
+                    bandit -f txt -o reports/bandit.txt app.py
                     cat reports/bandit.txt
-                    .venv/bin/bandit -q -ll app.py
+                    bandit -q -ll app.py
                     EXIT_BANDIT=$?
 
-                    .venv/bin/pip-audit -r requirements.txt -f json -o reports/pip-audit.json
-                    .venv/bin/pip-audit -r requirements.txt > reports/pip-audit.txt 2>&1
+                    pip-audit -r requirements.txt -f json -o reports/pip-audit.json
+                    pip-audit -r requirements.txt > reports/pip-audit.txt 2>&1
                     EXIT_AUDIT=$?
                     cat reports/pip-audit.txt
 
