@@ -5,16 +5,16 @@
 Además de las rutas de negocio, la app publica métricas para Prometheus en /metrics.
 Las métricas de seguridad (logins fallidos y peticiones sospechosas) se ven en Grafana.
 """
-import secrets
-from werkzeug.security import check_password_hash, generate_password_hash
 import os
 import re
+import secrets
 import sqlite3
 import time
-from markupsafe import escape
 
-from flask import Flask, Response, g, jsonify, render_template_string, request
+from flask import Flask, Response, g, jsonify, render_template_string, request, session
+from markupsafe import escape
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 
@@ -71,6 +71,7 @@ PORTADA = """<!doctype html>
 </form>
 <h2>Acceso administrador</h2>
 <form action="/login" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input name="usuario" value="admin"> <input name="clave" type="password" value="">
   <button type="submit">Entrar</button>
 </form>
@@ -128,15 +129,31 @@ def antes_de_la_peticion():
 @app.after_request
 def despues_de_la_peticion(respuesta):
     """!
-    @brief Registra la métrica de cada petición atendida.
+    @brief Registra la métrica de cada petición atendida y añade cabeceras HTTP de seguridad.
     @param respuesta Respuesta que Flask enviará al cliente.
-    @return La misma respuesta.
+    @return La misma respuesta con cabeceras endurecidas.
     """
     endpoint = request.url_rule.rule if request.url_rule else "desconocido"
     if endpoint != "/metrics":
         HTTP_PETICIONES.labels(request.method, endpoint, str(respuesta.status_code)).inc()
         HTTP_LATENCIA.labels(endpoint).observe(time.perf_counter() - g.get("inicio", time.perf_counter()))
+    respuesta.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'; form-action 'self'"
+    respuesta.headers["X-Content-Type-Options"] = "nosniff"
+    respuesta.headers["X-Frame-Options"] = "DENY"
+    respuesta.headers["Referrer-Policy"] = "no-referrer"
+    respuesta.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    respuesta.headers["Cache-Control"] = "no-store"
     return respuesta
+
+
+def obtener_csrf_token():
+    """!
+    @brief Genera y almacena un token anti-CSRF en la sesión actual.
+    @return Cadena aleatoria del token CSRF.
+    """
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
 
 
 @app.route("/")
@@ -145,7 +162,7 @@ def portada():
     @brief Portada HTML con enlaces y formularios del sistema.
     @return Página HTML.
     """
-    return render_template_string(PORTADA, version=VERSION)
+    return render_template_string(PORTADA, version=VERSION, csrf_token=obtener_csrf_token())
 
 
 @app.route("/hello")
@@ -156,6 +173,7 @@ def hello():
     """
     name = escape(request.args.get("name", "visitante"))
     return f"<h1>Hola, {name}!</h1>"
+
 
 @app.route("/health")
 def health():
@@ -197,6 +215,7 @@ def obtener_alumno(alumno_id):
         return jsonify({"error": "Alumno no encontrado"}), 404
     return jsonify(dict(fila))
 
+
 @app.route("/alumnos/buscar")
 def buscar_alumnos():
     """!
@@ -211,12 +230,20 @@ def buscar_alumnos():
         return jsonify({"error": "Error al consultar la base de datos"}), 500
     return jsonify([dict(f) for f in filas])
 
+
 @app.route("/login", methods=["POST"])
 def login():
     """!
-    @brief Valida las credenciales del administrador enviadas por formulario.
-    @return JSON con el resultado; 401 si las credenciales no son válidas.
+    @brief Valida el token CSRF y las credenciales del administrador enviadas por formulario.
+    @return JSON con el resultado; 403 si falla CSRF o 401 si las credenciales no son válidas.
     """
+    token_enviado = request.form.get("csrf_token", "")
+    token_sesion = session.get("csrf_token", "")
+    if not token_sesion or not secrets.compare_digest(token_enviado, token_sesion):
+        LOGIN_FALLIDOS.inc()
+        app.logger.warning("Token CSRF inválido desde %s", request.remote_addr)
+        return jsonify({"error": "Token CSRF inválido"}), 403
+
     usuario = request.form.get("usuario", "")
     clave = request.form.get("clave", "")
     if secrets.compare_digest(usuario, ADMIN_USUARIO) and check_password_hash(ADMIN_CLAVE_HASH, clave):
